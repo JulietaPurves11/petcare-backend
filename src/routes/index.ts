@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import authRoutes from './auth.routes';
 import petRoutes from './pet.routes';
+import serviceRoutes from './service.routes';
+import appointmentRoutes from './appointment.routes';
 
 const router = Router();
 
@@ -16,5 +18,7 @@ router.get('/health', (req, res) => {
 // Rutas declaradas
 router.use('/auth', authRoutes);
 router.use('/pets', petRoutes);
+router.use('/services', serviceRoutes);
+router.use('/appointments', appointmentRoutes);
 
 export default router;
