@@ -2,7 +2,7 @@ import { prisma } from '../config/db';
 import { AppointmentStatus } from '@prisma/client';
 
 export class AppointmentService {
-  // 1. Crear un nuevo turno (Cliente)
+  // 1. Crear un nuevo turno con validación de horario
   static async createAppointment(userId: string, data: { petId: string; serviceId: string; dateTime: string; notes?: string }) {
     // Validar que la mascota exista y pertenezca al usuario logueado
     const pet = await prisma.pet.findFirst({
@@ -22,10 +22,26 @@ export class AppointmentService {
       throw new Error('El servicio seleccionado no existe.');
     }
 
+    const requestedDate = new Date(data.dateTime);
+
+    // Validar que no haya otro turno activo en ese mismo horario exacto
+    const existingAppointment = await prisma.appointment.findFirst({
+      where: {
+        dateTime: requestedDate,
+        status: {
+          in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED],
+        },
+      },
+    });
+
+    if (existingAppointment) {
+      throw new Error('El horario seleccionado ya se encuentra ocupado. Por favor elige otro horario.');
+    }
+
     // Guardar el turno en la DB
     return prisma.appointment.create({
       data: {
-        dateTime: new Date(data.dateTime),
+        dateTime: requestedDate,
         notes: data.notes,
         userId: userId,
         petId: data.petId,
@@ -63,7 +79,7 @@ export class AppointmentService {
     });
   }
 
-  // 4. Cambiar estado de un turno (CONFIRMED, COMPLETED, CANCELLED)
+  // 4. Cambiar estado de un turno
   static async updateAppointmentStatus(appointmentId: string, status: AppointmentStatus) {
     const appointment = await prisma.appointment.findUnique({
       where: { id: appointmentId },
@@ -77,5 +93,73 @@ export class AppointmentService {
       where: { id: appointmentId },
       data: { status },
     });
+  }
+  
+  // 5. Consultar horarios disponibles para una fecha y servicio
+  static async getAvailableSlots(dateStr: string, serviceId: string) {
+    // 1. Obtener la duración del servicio
+    const service = await prisma.service.findUnique({
+      where: { id: serviceId },
+    });
+
+    if (!service) {
+      throw new Error('Servicio no encontrado.');
+    }
+
+    const durationMs = service.durationMinutes * 60 * 1000;
+
+    // 2. Definir rango de horario laboral para la fecha dada (ej: 09:00 a 18:00 UTC/Local)
+    const baseDate = new Date(dateStr);
+    const startTime = new Date(baseDate);
+    startTime.setUTCHours(9, 0, 0, 0); // Inicio: 09:00 AM
+
+    const endTime = new Date(baseDate);
+    endTime.setUTCHours(18, 0, 0, 0); // Fin: 06:00 PM
+
+    // 3. Obtener turnos ya reservados para ese día
+    const dayStart = new Date(baseDate);
+    dayStart.setUTCHours(0, 0, 0, 0);
+
+    const dayEnd = new Date(baseDate);
+    dayEnd.setUTCHours(23, 59, 59, 999);
+
+    const existingAppointments = await prisma.appointment.findMany({
+      where: {
+        dateTime: { gte: dayStart, lte: dayEnd },
+        status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
+      },
+    });
+
+    // 4. Generar bloques de horarios y filtrar los ocupados
+    const availableSlots: string[] = [];
+    let currentSlot = startTime;
+
+    while (currentSlot.getTime() + durationMs <= endTime.getTime()) {
+      const slotEndTime = new Date(currentSlot.getTime() + durationMs);
+
+      // Verificar si el bloque colisiona con alguna reserva existente
+      const isOccupied = existingAppointments.some((app) => {
+        const appStart = new Date(app.dateTime).getTime();
+        const appEnd = appStart + durationMs; // Asumimos misma duración o rango
+        const slotStart = currentSlot.getTime();
+        const slotEnd = slotEndTime.getTime();
+
+        return slotStart < appEnd && slotEnd > appStart;
+      });
+
+      if (!isOccupied) {
+        availableSlots.push(currentSlot.toISOString());
+      }
+
+      // Avanzar al siguiente bloque
+      currentSlot = new Date(currentSlot.getTime() + durationMs);
+    }
+
+    return {
+      date: dateStr,
+      service: service.name,
+      durationMinutes: service.durationMinutes,
+      availableSlots,
+    };
   }
 }

@@ -3,6 +3,7 @@ import authRoutes from './auth.routes';
 import petRoutes from './pet.routes';
 import serviceRoutes from './service.routes';
 import appointmentRoutes from './appointment.routes';
+import medicalRecordRoutes from './medical-record.routes';
 
 const router = Router();
 
@@ -20,5 +21,5 @@ router.use('/auth', authRoutes);
 router.use('/pets', petRoutes);
 router.use('/services', serviceRoutes);
 router.use('/appointments', appointmentRoutes);
-
+router.use('/medical-records', medicalRecordRoutes);
 export default router;

@@ -9,6 +9,9 @@ const router = Router();
 // Todas las rutas de turnos requieren token JWT
 router.use(authenticateToken);
 
+// Consulta de horarios disponibles (Cliente y Admin)
+router.get('/available-slots', AppointmentController.getAvailableSlots);
+
 // Rutas de cliente
 router.post('/', AppointmentController.create);
 router.get('/my-appointments', AppointmentController.getMyAppointments);
