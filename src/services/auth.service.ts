@@ -1,5 +1,6 @@
 import { prisma } from '../config/db';
 import { hashPassword, comparePassword, generateToken } from '../utils/auth';
+import { EmailService } from './email.service';
 
 export class AuthService {
   // Registro de usuario
@@ -37,6 +38,9 @@ export class AuthService {
     // Generar token
     const token = generateToken(newUser.id, newUser.role);
 
+    // Enviar email de bienvenida ANTES del return
+    EmailService.sendWelcomeEmail(newUser.email, newUser.fullName);
+
     return { user: newUser, token };
   }
 
@@ -66,6 +70,7 @@ export class AuthService {
 
     return { user: userWithoutPassword, token };
   }
+
   // Obtener perfil del usuario por ID
   static async getProfile(userId: string) {
     const user = await prisma.user.findUnique({

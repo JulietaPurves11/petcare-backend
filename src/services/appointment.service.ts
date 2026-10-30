@@ -1,5 +1,6 @@
 import { prisma } from '../config/db';
 import { AppointmentStatus } from '@prisma/client';
+import { EmailService } from './email.service';
 
 export class AppointmentService {
   // 1. Crear un nuevo turno con validación de horario
@@ -39,7 +40,7 @@ export class AppointmentService {
     }
 
     // Guardar el turno en la DB
-    return prisma.appointment.create({
+    const newAppointment = await prisma.appointment.create({
       data: {
         dateTime: requestedDate,
         notes: data.notes,
@@ -53,6 +54,20 @@ export class AppointmentService {
         service: { select: { name: true, price: true, durationMinutes: true } },
       },
     });
+
+    // Enviar notificación por correo al cliente ANTES del return
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (user) {
+      EmailService.sendAppointmentConfirmation(
+        user.email,
+        user.fullName,
+        pet.name,
+        service.name,
+        requestedDate
+      );
+    }
+
+    return newAppointment;
   }
 
   // 2. Listar turnos de un cliente específico
@@ -89,12 +104,27 @@ export class AppointmentService {
       throw new Error('El turno solicitado no existe.');
     }
 
-    return prisma.appointment.update({
+    const updatedAppointment = await prisma.appointment.update({
       where: { id: appointmentId },
       data: { status },
+      include: {
+        user: true,
+        pet: true,
+      },
     });
+
+    if (updatedAppointment.user) {
+      EmailService.sendAppointmentStatusUpdate(
+        updatedAppointment.user.email,
+        updatedAppointment.user.fullName,
+        updatedAppointment.pet.name,
+        status
+      );
+    }
+
+    return updatedAppointment;
   }
-  
+
   // 5. Consultar horarios disponibles para una fecha y servicio
   static async getAvailableSlots(dateStr: string, serviceId: string) {
     // 1. Obtener la duración del servicio
@@ -108,13 +138,13 @@ export class AppointmentService {
 
     const durationMs = service.durationMinutes * 60 * 1000;
 
-    // 2. Definir rango de horario laboral para la fecha dada (ej: 09:00 a 18:00 UTC/Local)
+    // 2. Definir rango de horario laboral para la fecha dada (09:00 a 18:00 UTC)
     const baseDate = new Date(dateStr);
     const startTime = new Date(baseDate);
-    startTime.setUTCHours(9, 0, 0, 0); // Inicio: 09:00 AM
+    startTime.setUTCHours(9, 0, 0, 0);
 
     const endTime = new Date(baseDate);
-    endTime.setUTCHours(18, 0, 0, 0); // Fin: 06:00 PM
+    endTime.setUTCHours(18, 0, 0, 0);
 
     // 3. Obtener turnos ya reservados para ese día
     const dayStart = new Date(baseDate);
@@ -137,10 +167,9 @@ export class AppointmentService {
     while (currentSlot.getTime() + durationMs <= endTime.getTime()) {
       const slotEndTime = new Date(currentSlot.getTime() + durationMs);
 
-      // Verificar si el bloque colisiona con alguna reserva existente
       const isOccupied = existingAppointments.some((app) => {
         const appStart = new Date(app.dateTime).getTime();
-        const appEnd = appStart + durationMs; // Asumimos misma duración o rango
+        const appEnd = appStart + durationMs;
         const slotStart = currentSlot.getTime();
         const slotEnd = slotEndTime.getTime();
 
@@ -151,7 +180,6 @@ export class AppointmentService {
         availableSlots.push(currentSlot.toISOString());
       }
 
-      // Avanzar al siguiente bloque
       currentSlot = new Date(currentSlot.getTime() + durationMs);
     }
 
